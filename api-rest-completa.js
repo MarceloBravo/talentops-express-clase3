@@ -8,11 +8,19 @@ const app = express();
 app.use(express.json());
 
 // Base de datos simulada
+let categorias = [
+  "general",
+  "programacion",
+  "diseño",
+  "marketing", 
+]
+
 let tareas = [
-  { id: 1, titulo: 'Aprender Express', descripcion: 'Completar tutorial', completada: false, prioridad: 'alta', usuarioId: 1 },
-  { id: 2, titulo: 'Crear API', descripcion: 'Implementar endpoints', completada: true, prioridad: 'media', usuarioId: 1 },
-  { id: 3, titulo: 'Testing', descripcion: 'Probar con Postman', completada: false, prioridad: 'baja', usuarioId: 2 }
+  { id: 1, titulo: 'Aprender Express', descripcion: 'Completar tutorial', completada: false, prioridad: 'alta', usuarioId: 1, categoria: 'programacion'},
+  { id: 2, titulo: 'Crear API', descripcion: 'Implementar endpoints', completada: true, prioridad: 'media', usuarioId: 1, categoria: 'programacion'},
+  { id: 3, titulo: 'Testing', descripcion: 'Probar con Postman', completada: false, prioridad: 'baja', usuarioId: 2, categoria: 'programacion'}
 ];
+
 
 let usuarios = [
   { id: 1, nombre: 'Admin', email: 'admin@example.com' },
@@ -74,6 +82,15 @@ const usuariosRouter = express.Router();
 tareasRouter.use(autenticar);
 usuariosRouter.use(autenticar);
 
+// RUTAS DE CATEGORIAS
+
+app.get('/api/categorias', (req, res) => {
+  res.json({
+      categorias,
+      total: categorias.length,
+    });
+});
+
 // RUTAS DE TAREAS
 
 // GET /tareas - Listar tareas con filtros avanzados
@@ -84,7 +101,8 @@ tareasRouter.get('/',
     query('usuario_id').optional().isInt({ min: 1 }).withMessage('usuario_id debe ser un número positivo'),
     query('pagina').optional().isInt({ min: 1 }).withMessage('pagina debe ser un número positivo'),
     query('limite').optional().isInt({ min: 1, max: 100 }).withMessage('limite debe estar entre 1 y 100'),
-    query('ordenar').optional().isIn(['titulo', 'prioridad', 'fecha']).withMessage('ordenar inválido')
+    query('ordenar').optional().isIn(['titulo', 'prioridad', 'fecha']).withMessage('ordenar inválido'),
+    query('categoria').optional().isIn(categorias).withMessage('categoria inválida')
   ],
   validarErrores,
   (req, res) => {
@@ -96,6 +114,7 @@ tareasRouter.get('/',
       pagina = 1,
       limite = 10,
       ordenar,
+      categoria,
       q // búsqueda
     } = req.query;
 
@@ -113,6 +132,10 @@ tareasRouter.get('/',
 
     if (usuario_id) {
       resultados = resultados.filter(t => t.usuarioId === parseInt(usuario_id));
+    }
+
+    if (categoria) {
+      resultados = resultados.filter(t => t.categoria === categoria);
     }
 
     // Búsqueda
@@ -133,6 +156,13 @@ tareasRouter.get('/',
         case 'prioridad':
           const prioridades = { baja: 1, media: 2, alta: 3 };
           resultados.sort((a, b) => prioridades[b.prioridad] - prioridades[a.prioridad]);
+          break;
+        case 'categoria':
+          const categoriasSort = categorias.reduce((acumulador, clave, index) => {
+            acumulador[clave] = index;
+            return acumulador;
+          }, {});
+          resultados.sort((a, b) => categoriasSort[b.categoria] - categoriasSort[a.categoria]);
           break;
       }
     }
@@ -169,7 +199,8 @@ tareasRouter.post('/',
     body('titulo').trim().isLength({ min: 3, max: 100 }).withMessage('Título debe tener entre 3 y 100 caracteres'),
     body('descripcion').optional().trim().isLength({ max: 500 }).withMessage('Descripción no puede exceder 500 caracteres'),
     body('prioridad').optional().isIn(['baja', 'media', 'alta']).withMessage('Prioridad inválida'),
-    body('completada').optional().isBoolean().withMessage('completada debe ser un booleano')
+    body('completada').optional().isBoolean().withMessage('completada debe ser un booleano'),
+    body('categoria').optional().isIn(categorias).withMessage('Categoría no existente')
   ],
   validarErrores,
   (req, res) => {
@@ -179,6 +210,7 @@ tareasRouter.post('/',
       descripcion: req.body.descripcion || '',
       completada: req.body.completada || false,
       prioridad: req.body.prioridad || 'media',
+      categoria: req.body.categoria || 'general',
       usuarioId: req.usuario.userId,
       fechaCreacion: new Date().toISOString()
     };
@@ -195,7 +227,8 @@ tareasRouter.put('/:id',
     body('titulo').trim().isLength({ min: 3, max: 100 }).withMessage('Título requerido'),
     body('descripcion').optional().trim().isLength({ max: 500 }).withMessage('Descripción muy larga'),
     body('prioridad').isIn(['baja', 'media', 'alta']).withMessage('Prioridad inválida'),
-    body('completada').isBoolean().withMessage('completada debe ser booleano')
+    body('completada').isBoolean().withMessage('completada debe ser booleano'),
+    body('categoria').isIn(categorias).withMessage('Categoría no existente')
   ],
   validarErrores,
   (req, res) => {
@@ -205,6 +238,7 @@ tareasRouter.put('/:id',
     tarea.descripcion = req.body.descripcion || '';
     tarea.prioridad = req.body.prioridad;
     tarea.completada = req.body.completada;
+    tarea.categoria = req.body.categoria;
     tarea.fechaActualizacion = new Date().toISOString();
 
     res.json(tarea);
@@ -217,7 +251,7 @@ tareasRouter.patch('/:id',
   validarErrores,
   (req, res) => {
     const tarea = encontrarTarea(req.params.id, req.usuario.userId);
-    const camposPermitidos = ['titulo', 'descripcion', 'prioridad', 'completada'];
+    const camposPermitidos = ['titulo', 'descripcion', 'prioridad', 'completada', 'categoria'];
 
     // Validar que al menos un campo sea proporcionado
     const camposActualizados = Object.keys(req.body);
@@ -247,6 +281,11 @@ tareasRouter.patch('/:id',
         case 'prioridad':
           if (!['baja', 'media', 'alta'].includes(req.body[campo])) {
             errors.push('prioridad: debe ser baja, media o alta');
+          }
+          break;
+        case 'categoria':
+          if (!categorias.includes(req.body[campo])) {
+            errors.push('categoria: debe ser: '+categorias.join(', '));
           }
           break;
         case 'completada':
@@ -329,6 +368,7 @@ app.get('/', (req, res) => {
         'POST /auth/login': 'Autenticación'
       },
       tareas: {
+        'GET /api/categorias': 'Listar categorias',
         'GET /api/tareas': 'Listar tareas (con filtros)',
         'GET /api/tareas/:id': 'Obtener tarea específica',
         'POST /api/tareas': 'Crear tarea',
