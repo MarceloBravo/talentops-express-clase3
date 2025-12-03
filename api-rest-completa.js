@@ -2,10 +2,12 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { AppError, ValidationError, NotFoundError } = require('./errores');
+const logger = require('./logger');
 
 // Crear aplicación
 const app = express();
 app.use(express.json());
+app.use(logger.requestLogger);
 
 // Base de datos simulada
 let categorias = [
@@ -85,10 +87,9 @@ usuariosRouter.use(autenticar);
 // RUTAS DE CATEGORIAS
 
 app.get('/api/categorias', (req, res) => {
-  res.json({
-      categorias,
-      total: categorias.length,
-    });
+  const payload = { categorias, total: categorias.length };
+  logger.info('Listar categorias', { total: categorias.length });
+  res.json(payload);
 });
 
 // RUTAS DE TAREAS
@@ -207,13 +208,15 @@ tareasRouter.get('/',
     const inicio = (paginaNum - 1) * limiteNum;
     const paginados = resultados.slice(inicio, inicio + limiteNum);
 
-    res.json({
+    const response = {
       tareas: paginados,
       total: resultados.length,
       pagina: paginaNum,
       limite: limiteNum,
       paginasTotal: Math.ceil(resultados.length / limiteNum)
-    });
+    };
+    logger.info('Listar tareas', { usuarioId: req.usuario?.userId, query: req.query, total: resultados.length });
+    res.json(response);
   }
 );
 
@@ -223,6 +226,7 @@ tareasRouter.get('/:id',
   validarErrores,
   (req, res) => {
     const tarea = encontrarTarea(req.params.id, req.usuario.userId);
+    logger.info('Obtener tarea', { id: req.params.id, usuarioId: req.usuario.userId });
     res.json(tarea);
   }
 );
@@ -250,6 +254,7 @@ tareasRouter.post('/',
     };
 
     tareas.push(nuevaTarea);
+    logger.info('Tarea creada', { id: nuevaTarea.id, usuarioId: req.usuario.userId, titulo: nuevaTarea.titulo });
     res.status(201).json(nuevaTarea);
   }
 );
@@ -280,6 +285,7 @@ tareasRouter.put('/:id',
     tarea.categoria = req.body.categoria;
     tarea.fechaActualizacion = new Date().toISOString();
 
+    logger.info('Tarea actualizada (PUT)', { id: tarea.id, usuarioId: req.usuario.userId });
     res.json(tarea);
   }
 );
@@ -349,6 +355,7 @@ tareasRouter.patch('/:id',
     }
 
     tarea.fechaActualizacion = new Date().toISOString();
+    logger.info('Tarea actualizada (PATCH)', { id: tarea.id, usuarioId: req.usuario.userId, campos: Object.keys(req.body) });
     res.json(tarea);
   }
 );
@@ -365,6 +372,7 @@ tareasRouter.delete('/:id',
     }
 
     const tareaEliminada = tareas.splice(indice, 1)[0];
+    logger.info('Tarea eliminada', { id: tareaEliminada.id, usuarioId: req.usuario.userId });
     res.json({ mensaje: 'Tarea eliminada', tarea: tareaEliminada });
   }
 );
@@ -379,6 +387,7 @@ usuariosRouter.get('/:id',
     const usuario = encontrarUsuario(req.params.id);
     // Solo devolver datos públicos
     const { id, nombre, email } = usuario;
+    logger.info('Consultar usuario', { id });
     res.json({ id, nombre, email });
   }
 );
@@ -452,10 +461,13 @@ app.post('/auth/login', (req, res) => {
   const { email, password } = req.body;
 
   if (email === 'admin@example.com' && password === 'admin123') {
+    logger.info('Login exitoso', { email, usuarioId: 1 });
     res.json({ token: 'admin-token', usuario: { id: 1, nombre: 'Admin' } });
   } else if (email === 'user@example.com' && password === 'user123') {
+    logger.info('Login exitoso', { email, usuarioId: 2 });
     res.json({ token: 'user-token', usuario: { id: 2, nombre: 'Usuario' } });
   } else {
+    logger.info('Login fallido', { email });
     res.status(401).json({ error: 'Credenciales inválidas' });
   }
 });
@@ -494,7 +506,12 @@ app.get('/', (req, res) => {
 
 // Middleware de error centralizado
 app.use((error, req, res, next) => {
-  console.error('Error:', error);
+  logger.error(error.message || 'Error interno', {
+    stack: error.stack,
+    path: req.originalUrl,
+    method: req.method,
+    body: req.body
+  });
 
   if (error instanceof AppError) {
     return res.status(error.statusCode).json({
