@@ -121,21 +121,55 @@ tareasRouter.get('/',
     // Filtrar por usuario autenticado
     resultados = resultados.filter(t => t.usuarioId === req.usuario.userId);
 
-    // Filtros adicionales
-    if (completada !== undefined) {
-      resultados = resultados.filter(t => t.completada === (completada === 'true'));
-    }
+    // Filtros adicionales y búsqueda avanzada
+    if (req.query.filtros) {
+      try {
+        const { operator, conditions } = JSON.parse(req.query.filtros);
+        
+        if (!['AND', 'OR'].includes(operator)) {
+          throw new Error("El operador debe ser 'AND' o 'OR'");
+        }
+        if (!Array.isArray(conditions)) {
+          throw new Error("Las condiciones deben ser un array");
+        }
 
-    if (prioridad) {
-      resultados = resultados.filter(t => t.prioridad === prioridad);
-    }
+        resultados = resultados.filter(tarea => {
+          if (operator === 'AND') {
+            return conditions.every(cond => {
+              const { field, value } = cond;
+              if (typeof tarea[field] === 'boolean') {
+                return tarea[field] === (value === 'true');
+              }
+              return tarea[field] == value;
+            });
+          } else { // OR
+            return conditions.some(cond => {
+              const { field, value } = cond;
+              if (typeof tarea[field] === 'boolean') {
+                return tarea[field] === (value === 'true');
+              }
+              return tarea[field] == value;
+            });
+          }
+        });
 
-    if (usuario_id) {
-      resultados = resultados.filter(t => t.usuarioId === parseInt(usuario_id));
-    }
-
-    if (categoria) {
-      resultados = resultados.filter(t => t.categoria === categoria);
+      } catch (error) {
+        throw new AppError(`Filtro inválido: ${error.message}`, 400);
+      }
+    } else {
+      // Filtros simples (si no se usa el filtro avanzado)
+      if (completada !== undefined) {
+        resultados = resultados.filter(t => t.completada === (completada === 'true'));
+      }
+      if (prioridad) {
+        resultados = resultados.filter(t => t.prioridad === prioridad);
+      }
+      if (usuario_id) {
+        resultados = resultados.filter(t => t.usuarioId === parseInt(usuario_id));
+      }
+      if (categoria) {
+        resultados = resultados.filter(t => t.categoria === categoria);
+      }
     }
 
     // Búsqueda
