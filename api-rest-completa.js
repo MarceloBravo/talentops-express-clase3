@@ -16,9 +16,9 @@ let categorias = [
 ]
 
 let tareas = [
-  { id: 1, titulo: 'Aprender Express', descripcion: 'Completar tutorial', completada: false, prioridad: 'alta', usuarioId: 1, categoria: 'programacion'},
-  { id: 2, titulo: 'Crear API', descripcion: 'Implementar endpoints', completada: true, prioridad: 'media', usuarioId: 1, categoria: 'programacion'},
-  { id: 3, titulo: 'Testing', descripcion: 'Probar con Postman', completada: false, prioridad: 'baja', usuarioId: 2, categoria: 'programacion'}
+  { id: 1, titulo: 'Aprender Express', descripcion: 'Completar tutorial', completada: false, prioridad: 'alta', usuarioId: 1, categoria: 'programacion', fechaCompletada: null},
+  { id: 2, titulo: 'Crear API', descripcion: 'Implementar endpoints', completada: true, prioridad: 'media', usuarioId: 1, categoria: 'programacion', fechaCompletada: new Date().toISOString()},
+  { id: 3, titulo: 'Testing', descripcion: 'Probar con Postman', completada: false, prioridad: 'baja', usuarioId: 2, categoria: 'programacion', fechaCompletada: null}
 ];
 
 
@@ -234,6 +234,11 @@ tareasRouter.put('/:id',
   (req, res) => {
     const tarea = encontrarTarea(req.params.id, req.usuario.userId);
 
+    // Marcar fecha de finalización si la tarea se completa
+    if (req.body.completada && !tarea.completada) {
+      tarea.fechaCompletada = new Date().toISOString();
+    }
+
     tarea.titulo = req.body.titulo;
     tarea.descripcion = req.body.descripcion || '';
     tarea.prioridad = req.body.prioridad;
@@ -302,6 +307,10 @@ tareasRouter.patch('/:id',
 
     // Aplicar actualizaciones
     for (const campo of camposActualizados) {
+      // Marcar fecha de finalización si la tarea se completa
+      if (campo === 'completada' && req.body.completada && !tarea.completada) {
+        tarea.fechaCompletada = new Date().toISOString();
+      }
       tarea[campo] = campo === 'titulo' || campo === 'descripcion' ? req.body[campo].trim() : req.body[campo];
     }
 
@@ -340,7 +349,67 @@ usuariosRouter.get('/:id',
   }
 );
 
+// Crear router para estadísticas
+const statsRouter = express.Router();
+statsRouter.use(autenticar); // Proteger las estadísticas
+
+// GET /tareas-completadas-por-dia
+statsRouter.get('/tareas-completadas-por-dia', (req, res) => {
+  const tareasCompletadas = tareas.filter(t => t.completada && t.fechaCompletada);
+
+  const porDia = tareasCompletadas.reduce((acc, tarea) => {
+    const fecha = new Date(tarea.fechaCompletada).toISOString().split('T')[0]; // Obtener solo la fecha YYYY-MM-DD
+    acc[fecha] = (acc[fecha] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Ordenar por fecha para mejor visualización
+  const datosOrdenados = Object.keys(porDia).sort().reduce(
+    (obj, key) => {
+      obj[key] = porDia[key];
+      return obj;
+    },
+    {}
+  );
+
+  res.json({
+    descripcion: 'Cantidad de tareas completadas por día',
+    datos: datosOrdenados
+  });
+});
+
+// GET /productividad-usuarios
+statsRouter.get('/productividad-usuarios', (req, res) => {
+  const tareasCompletadas = tareas.filter(t => t.completada);
+
+  const productividadPorUsuario = tareasCompletadas.reduce((acc, tarea) => {
+    const usuario = usuarios.find(u => u.id === tarea.usuarioId);
+    const nombreUsuario = usuario ? usuario.nombre : `Usuario ID ${tarea.usuarioId}`;
+
+    if (!acc[nombreUsuario]) {
+      acc[nombreUsuario] = {
+        idUsuario: tarea.usuarioId,
+        nombreUsuario,
+        totalCompletadas: 0,
+      };
+    }
+    acc[nombreUsuario].totalCompletadas += 1;
+    return acc;
+  }, {});
+
+
+  // Convertir a array y ordenar por total de completadas para un ranking
+  const rankingProductividad = Object.values(productividadPorUsuario).sort((a, b) => b.totalCompletadas - a.totalCompletadas);
+
+  res.json({
+    descripcion: 'Productividad por usuario (tareas completadas)',
+    datos: rankingProductividad
+  });
+});
+
+
 // Usar routers en la aplicación
+app.use('/api/stats', statsRouter);
 app.use('/api/tareas', tareasRouter);
 app.use('/api/usuarios', usuariosRouter);
 
